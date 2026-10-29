@@ -13,7 +13,7 @@ from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config import Settings, get_settings
+from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +32,12 @@ class RAGService:
         if self._embeddings is None:
             logger.info("Initializing embedding model: %s", self.settings.EMBEDDING_MODEL_NAME)
             try:
-                # Fast path: use already downloaded cached model weights
                 self._embeddings = HuggingFaceEmbeddings(
                     model_name=self.settings.EMBEDDING_MODEL_NAME,
                     model_kwargs={"device": "cpu", "local_files_only": True},
                     encode_kwargs={"normalize_embeddings": True},
                 )
             except Exception:
-                # Fallback to standard initialization if not yet in local cache
                 self._embeddings = HuggingFaceEmbeddings(
                     model_name=self.settings.EMBEDDING_MODEL_NAME,
                     model_kwargs={"device": "cpu"},
@@ -82,7 +80,6 @@ class RAGService:
     def retrieve_context(self, query: str, top_k: Optional[int] = None) -> List[Document]:
         """
         Retrieves top-k relevant document chunks for the given query.
-        Returns an empty list safely if retriever is unavailable.
         """
         retriever = self.get_retriever(top_k=top_k)
         if retriever is None:
@@ -169,7 +166,6 @@ class RAGService:
         }
 
 
-# Global singleton instance
 _rag_service: Optional[RAGService] = None
 
 

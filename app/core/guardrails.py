@@ -10,7 +10,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Pattern
 
-from config import Settings, get_settings
+from app.core.config import Settings, get_settings
 
 logger = logging.getLogger("synkcorp.guardrails")
 
@@ -31,7 +31,6 @@ class InputGuardrail:
     the vector database or language model.
     """
 
-    # High-confidence prompt injection and jailbreak patterns
     INJECTION_PATTERNS: List[Pattern] = [
         re.compile(r"ignore\s+(?:all\s+)?(?:previous|prior|above)\s+(?:instructions|rules|prompts|directions)", re.IGNORECASE),
         re.compile(r"(?:disregard|forget)\s+(?:all\s+)?(?:previous|prior)\s+(?:instructions|rules|prompts)", re.IGNORECASE),
@@ -43,13 +42,8 @@ class InputGuardrail:
         re.compile(r"(?:pretend|act\s+as\s+if)\s+you\s+have\s+no\s+(?:rules|filters|morals|limits)", re.IGNORECASE),
     ]
 
-    # Personally Identifiable Information (PII) redaction regexes
-    CREDIT_CARD_PATTERN: Pattern = re.compile(
-        r"\b(?:\d{4}[ -]?){3}\d{4}\b"
-    )
-    SSN_PATTERN: Pattern = re.compile(
-        r"\b\d{3}-\d{2}-\d{4}\b"
-    )
+    CREDIT_CARD_PATTERN: Pattern = re.compile(r"\b(?:\d{4}[ -]?){3}\d{4}\b")
+    SSN_PATTERN: Pattern = re.compile(r"\b\d{3}-\d{2}-\d{4}\b")
     API_KEY_PATTERN: Pattern = re.compile(
         r"\b(?:sk-[a-zA-Z0-9_\-]{20,}|ghp_[a-zA-Z0-9]{20,}|bearer\s+[a-zA-Z0-9_\-\.]{25,})\b",
         re.IGNORECASE,
@@ -165,14 +159,12 @@ class OutputGuardrail:
             )
 
         # 2. Strict Grounding Validation
-        # If no context was found, enforce standard refusal instead of hallucinating facts
         if self.settings.GUARDRAIL_STRICT_GROUNDING and not context.strip():
             safe_refusal = (
                 "I couldn't find that information in the available "
                 "Synk Corp documents. Please contact the company "
                 "for confirmation."
             )
-            # If the model tried to answer anyway without context, sanitize to safe refusal
             if answer.strip() != safe_refusal and len(answer) > 200:
                 logger.info("Enforcing strict grounding fallback for ungrounded answer.")
                 return GuardrailResult(
@@ -204,7 +196,6 @@ class GuardrailsService:
         return self.output_guard.validate(answer, context)
 
 
-# Singleton instance
 _guardrails_service: Optional[GuardrailsService] = None
 
 

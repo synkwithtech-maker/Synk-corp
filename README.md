@@ -116,6 +116,50 @@ curl -X PUT "http://127.0.0.1:8000/rag/documents/company_policy.pdf" `
 
 ---
 
+## 📁 Modular Project Architecture
+
+All Python logic is organized into clean, single-responsibility folders inside [`app/`](file:///d:/synkcorp/app) so that debugging, testing, and adding features is effortless:
+
+```
+synkcorp/
+├── app/
+│   ├── api/                   # HTTP Route Controllers (FastAPI APIRouter)
+│   │   ├── chat.py            # /chat, /chat/stream, history & session endpoints
+│   │   ├── rag.py             # /rag/upload, update, delete, list, url scraping
+│   │   └── health.py          # / and /health status probes
+│   ├── core/                  # System Foundations & Policies
+│   │   ├── config.py          # Pydantic Settings & environment variables (.env)
+│   │   └── guardrails.py      # Prompt injection blocker, PII redaction & grounding
+│   ├── schemas/               # Request/Response Data Models (Pydantic)
+│   │   ├── chat.py            # ChatRequest, ChatResponse, Stream events
+│   │   └── rag.py             # Upload, update, delete, search schemas
+│   ├── services/              # Business Logic & External Engines
+│   │   ├── chatbot.py         # LangGraph customer support state graph & streaming
+│   │   ├── rag.py             # Qdrant vector store indexing, search & point deletion
+│   │   ├── memory.py          # Redis conversational memory & in-memory fallback
+│   │   └── ingest.py          # Multi-format parser (PDF, DOCX, CSV, JSON, Web)
+│   └── main.py                # FastAPI app factory, CORS, lifespan hooks
+├── documents/                 # Corporate documents repository for RAG
+├── qdrant_data/               # Persistent local Qdrant vector store
+├── api.py                     # Root compatibility runner (uvicorn api:app --reload)
+├── main.py                    # Root entrypoint (python main.py)
+├── ingest.py                  # CLI ingest tool (python ingest.py)
+├── requirements.txt           # Project dependencies
+└── README.md                  # System documentation
+```
+
+### 🛠️ Where to Debug & Modify
+
+- **Change Prompts / LLM Logic**: Modify [`app/services/chatbot.py`](file:///d:/synkcorp/app/services/chatbot.py).
+- **Configure Vector Search & Qdrant**: Modify [`app/services/rag.py`](file:///d:/synkcorp/app/services/rag.py).
+- **Update Safety Filters & PII Rules**: Modify [`app/core/guardrails.py`](file:///d:/synkcorp/app/core/guardrails.py).
+- **Adjust Redis TTL / Fallback Memory**: Modify [`app/services/memory.py`](file:///d:/synkcorp/app/services/memory.py).
+- **Add or Modify API Routes**: Update [`app/api/chat.py`](file:///d:/synkcorp/app/api/chat.py) or [`app/api/rag.py`](file:///d:/synkcorp/app/api/rag.py).
+- **Add Request / Response Fields**: Update [`app/schemas/chat.py`](file:///d:/synkcorp/app/schemas/chat.py) or [`app/schemas/rag.py`](file:///d:/synkcorp/app/schemas/rag.py).
+- **Add Environment Variables**: Update [`app/core/config.py`](file:///d:/synkcorp/app/core/config.py) and `.env`.
+
+---
+
 ### 3. Manage via Swagger UI
 Open **[http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)**:
 - Navigate to **`RAG Document Processing`**:

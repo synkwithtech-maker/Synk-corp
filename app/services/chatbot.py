@@ -2,7 +2,7 @@
 Synk Corp Customer Support Chatbot Engine.
 Orchestrated with LangGraph, grounded by Qdrant RAG, protected by
 Defense-in-Depth Guardrails, and statefully backed by Redis conversation memory.
-Supports both synchronous completion and real-time Server-Sent Events (SSE) token streaming.
+Supports synchronous completion and real-time Server-Sent Events (SSE) token streaming.
 """
 
 import asyncio
@@ -15,17 +15,13 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import InMemorySaver
 
-from config import Settings, get_settings
-from memory import BaseMemoryManager, get_memory_manager
-from rag import RAGService, get_rag_service
-from guardrails import GuardrailsService, get_guardrails_service
+from app.core.config import Settings, get_settings
+from app.services.memory import BaseMemoryManager, get_memory_manager
+from app.services.rag import RAGService, get_rag_service
+from app.core.guardrails import GuardrailsService, get_guardrails_service
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# 1. State Definition
-# ---------------------------------------------------------------------------
 
 class SupportState(TypedDict):
     """LangGraph state representation for guarded customer support workflow."""
@@ -40,10 +36,6 @@ class SupportState(TypedDict):
     guardrail_category: str
     guardrail_reason: Optional[str]
 
-
-# ---------------------------------------------------------------------------
-# 2. Support Workflow Engine with Guardrails & Streaming
-# ---------------------------------------------------------------------------
 
 class SupportChatbotEngine:
     """
@@ -168,7 +160,7 @@ Answer:
         context = "\n\n".join(context_parts)
         return {
             "context": context,
-            "sources": list(dict.fromkeys(sources)),  # deduplicated
+            "sources": list(dict.fromkeys(sources)),
         }
 
     def _generate_node(self, state: SupportState) -> Dict[str, Any]:
@@ -177,7 +169,6 @@ Answer:
         context = state.get("context", "").strip()
         history = state.get("history", [])
 
-        # Avoid hallucinations if no context is retrieved
         if not context:
             answer = (
                 "I couldn't find that information in the available "
@@ -224,17 +215,14 @@ Answer:
         if self._graph is None:
             builder = StateGraph(SupportState)
 
-            # Define graph nodes
             builder.add_node("input_guardrail", self._input_guardrail_node)
             builder.add_node("guardrail_block", self._guardrail_block_node)
             builder.add_node("retrieve", self._retrieve_node)
             builder.add_node("answer", self._generate_node)
             builder.add_node("output_guardrail", self._output_guardrail_node)
 
-            # Route from START to input guardrail
             builder.add_edge(START, "input_guardrail")
 
-            # Conditional routing: proceed to retrieve only if input passed guardrails
             builder.add_conditional_edges(
                 "input_guardrail",
                 lambda state: "safe" if state.get("guardrail_passed", True) else "blocked",
@@ -244,21 +232,17 @@ Answer:
                 },
             )
 
-            # Standard processing pipeline
             builder.add_edge("retrieve", "answer")
             builder.add_edge("answer", "output_guardrail")
             builder.add_edge("output_guardrail", END)
             builder.add_edge("guardrail_block", END)
 
-            # In-memory checkpointing for graph execution state
             self._graph = builder.compile(checkpointer=InMemorySaver())
         return self._graph
 
     def ask(self, question: str, session_id: str) -> Dict[str, Any]:
         """
         Synchronous customer support turn.
-        Retrieves history from Redis memory, runs guarded LangGraph, and persists
-        the clean dialogue turn back into Redis.
         """
         config = {
             "configurable": {
@@ -266,13 +250,11 @@ Answer:
             }
         }
 
-        # 1. Fetch conversation history from Redis / memory manager
         history = self.memory_manager.get_messages(
             session_id=session_id,
             limit=self.settings.MAX_HISTORY_TURNS * 2,
         )
 
-        # 2. Invoke guarded LangGraph workflow
         initial_state: SupportState = {
             "question": question,
             "raw_question": question,
@@ -293,7 +275,6 @@ Answer:
         guardrail_category = result.get("guardrail_category", "clean")
         sanitized_question = result.get("question", question)
 
-        # 3. Only persist dialogue turn into Redis if input passed guardrails
         if guardrail_passed:
             self.memory_manager.append_turn(
                 session_id=session_id,
@@ -318,7 +299,6 @@ Answer:
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Real-time token streaming generator for customer support queries.
-        Emits events: start, guardrail_blocked, sources, token, done.
         """
         start_time = time.perf_counter()
 
@@ -327,7 +307,6 @@ Answer:
             "session_id": session_id,
         }
 
-        # 1. Input Guardrail
         raw_question = question.strip()
         guard_result = self.guardrails.check_input(raw_question)
 
@@ -356,7 +335,6 @@ Answer:
 
         sanitized_question = guard_result.sanitized_text
 
-        # 2. Retrieve Context (in async worker thread to keep event loop free)
         docs = await asyncio.to_thread(self.rag_service.retrieve_context, sanitized_question)
         context_parts = []
         sources = []
@@ -373,7 +351,6 @@ Answer:
             "sources": sources,
         }
 
-        # 3. Check for empty context
         if not context.strip():
             fallback_answer = (
                 "I couldn't find that information in the available "
@@ -402,7 +379,6 @@ Answer:
             }
             return
 
-        # 4. Fetch recent dialogue history from Redis
         history = await asyncio.to_thread(
             self.memory_manager.get_messages,
             session_id,
@@ -415,7 +391,6 @@ Answer:
             history=history,
         )
 
-        # 5. Stream LLM tokens chunk-by-chunk
         full_answer_parts = []
         try:
             async for chunk in self.llm.astream(prompt):
@@ -437,7 +412,6 @@ Answer:
 
         full_answer = "".join(full_answer_parts)
 
-        # 6. Output Guardrail Check
         output_guard = self.guardrails.check_output(full_answer, context)
         final_answer = output_guard.sanitized_text
         if final_answer != full_answer:
@@ -446,7 +420,6 @@ Answer:
                 "answer": final_answer,
             }
 
-        # 7. Persist complete dialogue turn to Redis
         await asyncio.to_thread(
             self.memory_manager.append_turn,
             session_id,
@@ -455,7 +428,6 @@ Answer:
             {"sources": sources, "streaming": True},
         )
 
-        # 8. Done event with timing and sources
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
         yield {
             "event": "done",
@@ -467,10 +439,6 @@ Answer:
             "latency_ms": latency_ms,
         }
 
-
-# ---------------------------------------------------------------------------
-# 3. Global Singleton & Exported Functions
-# ---------------------------------------------------------------------------
 
 _engine: Optional[SupportChatbotEngine] = None
 
@@ -484,32 +452,20 @@ def get_chatbot_engine() -> SupportChatbotEngine:
 
 
 def ask_question(question: str, session_id: str) -> str:
-    """
-    Standard interface invoked by API endpoints.
-    Maintains 100% backward compatibility by returning the string answer.
-    """
+    """Standard interface invoked by API endpoints."""
     engine = get_chatbot_engine()
     result = engine.ask(question=question, session_id=session_id)
     return result["answer"]
 
 
 def ask_question_detailed(question: str, session_id: str) -> Dict[str, Any]:
-    """
-    Rich interface providing answer, sources, and guardrail metadata.
-    """
+    """Rich interface providing answer, sources, and guardrail metadata."""
     engine = get_chatbot_engine()
     return engine.ask(question=question, session_id=session_id)
 
 
 async def stream_chat_events(question: str, session_id: str) -> AsyncGenerator[str, None]:
-    """
-    Formats the ask_stream generator into standard SSE (Server-Sent Events) chunks.
-    Format:
-        event: <event_name>\n
-        data: <json_string>\n\n
-    Final message:
-        data: [DONE]\n\n
-    """
+    """Formats the ask_stream generator into standard SSE chunks."""
     engine = get_chatbot_engine()
     async for item in engine.ask_stream(question=question, session_id=session_id):
         event_name = item.get("event", "message")

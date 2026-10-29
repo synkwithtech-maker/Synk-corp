@@ -11,7 +11,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
 
 import redis
-from config import Settings, get_settings
+from app.core.config import Settings, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,6 @@ class RedisMemoryManager(BaseMemoryManager):
                     socket_timeout=2.0,
                     socket_connect_timeout=2.0,
                 )
-            # Test connection
             self._client.ping()
             logger.info("Connected to Redis conversation store at %s", self.settings.REDIS_URL or self.settings.REDIS_HOST)
         except Exception as e:
@@ -90,16 +89,11 @@ class RedisMemoryManager(BaseMemoryManager):
             return False
 
     def get_messages(self, session_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
-        """
-        Retrieves messages for a session.
-        If limit is provided, returns the most recent 'limit' messages.
-        """
         if not self.is_connected():
             return []
 
         key = self._get_key(session_id)
         try:
-            # Redis list stores messages chronologically (RPUSH)
             raw_items = self._client.lrange(key, 0, -1)
             messages = [json.loads(item) for item in raw_items]
 
@@ -117,9 +111,6 @@ class RedisMemoryManager(BaseMemoryManager):
         assistant_message: str,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """
-        Appends user and assistant messages atomically and refreshes TTL.
-        """
         if not self.is_connected():
             logger.warning("Redis client not connected; skipping persistence for session '%s'", session_id)
             return
@@ -143,16 +134,13 @@ class RedisMemoryManager(BaseMemoryManager):
         try:
             pipeline = self._client.pipeline()
             pipeline.rpush(key, user_entry, assistant_entry)
-            # Keep max 50 turns (100 messages) per session to prevent unbounded memory growth
             pipeline.ltrim(key, -100, -1)
             pipeline.expire(key, self.ttl)
             pipeline.execute()
-            logger.debug("Appended dialogue turn to Redis for session: %s", session_id)
         except Exception as e:
             logger.error("Failed to append dialogue turn to Redis for session '%s': %s", session_id, e)
 
     def clear(self, session_id: str) -> bool:
-        """Deletes all messages for the specified session."""
         if not self.is_connected():
             return False
         key = self._get_key(session_id)
@@ -163,7 +151,6 @@ class RedisMemoryManager(BaseMemoryManager):
             return False
 
     def health_check(self) -> Dict[str, Any]:
-        """Performs a Redis health probe measuring latency."""
         start = time.perf_counter()
         try:
             if self._client and self._client.ping():
@@ -191,7 +178,6 @@ class RedisMemoryManager(BaseMemoryManager):
 class InMemoryMemoryManager(BaseMemoryManager):
     """
     In-memory fallback conversation memory store.
-    Used when Redis is not configured or temporarily unreachable.
     """
 
     def __init__(self, settings: Settings):
@@ -226,7 +212,6 @@ class InMemoryMemoryManager(BaseMemoryManager):
             "timestamp": timestamp,
             "metadata": metadata or {},
         })
-        # Keep recent 100 messages
         self._store[session_id] = self._store[session_id][-100:]
 
     def clear(self, session_id: str) -> bool:
@@ -246,8 +231,7 @@ class InMemoryMemoryManager(BaseMemoryManager):
 
 class ResilientMemoryService(BaseMemoryManager):
     """
-    Composite memory manager that delegates to Redis when available,
-    and seamlessly falls back to InMemory storage if Redis is down.
+    Composite memory manager delegating to Redis or fallback.
     """
 
     def __init__(self, settings: Optional[Settings] = None):
@@ -274,7 +258,6 @@ class ResilientMemoryService(BaseMemoryManager):
         self.active_backend.append_turn(session_id, user_message, assistant_message, metadata)
 
     def clear(self, session_id: str) -> bool:
-        # Clear in both to maintain consistency
         redis_cleared = self.redis_manager.clear(session_id) if self.redis_manager else False
         fallback_cleared = self.fallback_manager.clear(session_id)
         return redis_cleared or fallback_cleared
@@ -287,7 +270,6 @@ class ResilientMemoryService(BaseMemoryManager):
         return backend_info
 
 
-# Global singleton instance
 _memory_service: Optional[ResilientMemoryService] = None
 
 

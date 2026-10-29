@@ -4,22 +4,27 @@ Uses Pydantic Settings for strict typing, default values, and .env loading.
 """
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Root directory of the project
+ROOT_DIR = Path(__file__).resolve().parents[2]
+ENV_FILE = ROOT_DIR / ".env"
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(ENV_FILE) if ENV_FILE.exists() else ".env",
         env_file_encoding="utf-8",
         extra="ignore",
     )
 
     # Application settings
     APP_NAME: str = Field(default="Synk Corp Support API", description="Application name")
-    APP_VERSION: str = Field(default="2.1.0", description="Application version")
-    ENVIRONMENT: str = Field(default="development", description="Runtime environment (development/production)")
+    APP_VERSION: str = Field(default="2.2.0", description="Application version")
+    ENVIRONMENT: str = Field(default="development", description="Runtime environment")
     LOG_LEVEL: str = Field(default="INFO", description="Logging level")
 
     # OpenRouter / LLM settings
@@ -41,9 +46,12 @@ class Settings(BaseSettings):
         default="sentence-transformers/all-MiniLM-L6-v2",
         description="HuggingFace model for embeddings",
     )
-    QDRANT_PATH: str = Field(default="./qdrant_data", description="Local path for Qdrant storage")
+    QDRANT_PATH: str = Field(default=str(ROOT_DIR / "qdrant_data"), description="Local path for Qdrant storage")
     QDRANT_COLLECTION_NAME: str = Field(default="synk_company_docs", description="Qdrant collection name")
     TOP_K_DOCUMENTS: int = Field(default=4, ge=1, le=20, description="Number of context chunks to retrieve")
+
+    # Storage paths
+    DOCUMENTS_DIR: Path = Field(default=ROOT_DIR / "documents", description="Folder storing knowledge documents")
 
     # Redis conversation memory settings
     REDIS_ENABLED: bool = Field(default=True, description="Enable Redis memory backend")
@@ -72,11 +80,11 @@ class Settings(BaseSettings):
     GUARDRAILS_ENABLED: bool = Field(default=True, description="Master switch for safety guardrails")
     GUARDRAIL_BLOCK_PROMPT_INJECTION: bool = Field(
         default=True,
-        description="Detect and block prompt injections, jailbreaks, and system override attempts",
+        description="Detect and block prompt injections, jailbreaks, and system overrides",
     )
     GUARDRAIL_MASK_PII: bool = Field(
         default=True,
-        description="Mask sensitive PII (credit cards, SSNs, API tokens) before processing and storage",
+        description="Mask sensitive PII (credit cards, SSNs, API tokens) before storage",
     )
     GUARDRAIL_STRICT_GROUNDING: bool = Field(
         default=True,
