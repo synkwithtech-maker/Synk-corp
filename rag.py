@@ -1,7 +1,8 @@
 """
 RAG (Retrieval-Augmented Generation) Service.
 Manages vector embeddings, local Qdrant vector store connection,
-and document retrieval with source attribution.
+document retrieval with source attribution, incremental indexing,
+and document vector deletion/lifecycle.
 """
 
 import logging
@@ -10,6 +11,7 @@ from typing import Any, Dict, List, Optional
 from langchain_core.documents import Document
 from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_qdrant import QdrantVectorStore
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import Settings, get_settings
 
@@ -17,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 
 class RAGService:
-    """Service encapsulating document retrieval from Qdrant vector store."""
+    """Service encapsulating document retrieval, vector indexing, and deletion with Qdrant."""
 
     def __init__(self, settings: Optional[Settings] = None):
         self.settings = settings or get_settings()
@@ -92,6 +94,68 @@ class RAGService:
         except Exception as e:
             logger.error("Error retrieving context for query '%s': %s", query, e)
             return []
+
+    def add_documents(self, documents: List[Document]) -> int:
+        """
+        Splits and incrementally adds documents into the active Qdrant collection.
+        Returns the count of new chunks added.
+        """
+        if not documents:
+            return 0
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=700,
+            chunk_overlap=100,
+            separators=["\n\n", "\n", ". ", " ", ""],
+        )
+        chunks = splitter.split_documents(documents)
+        if not chunks:
+            return 0
+
+        vs = self.vector_store
+        if vs is None:
+            logger.info("Initializing new Qdrant collection '%s' with %d chunks", self.settings.QDRANT_COLLECTION_NAME, len(chunks))
+            self._vector_store = QdrantVectorStore.from_documents(
+                documents=chunks,
+                embedding=self.embeddings,
+                path=self.settings.QDRANT_PATH,
+                collection_name=self.settings.QDRANT_COLLECTION_NAME,
+            )
+        else:
+            vs.add_documents(chunks)
+
+        logger.info("Successfully indexed %d chunk(s) into collection '%s'", len(chunks), self.settings.QDRANT_COLLECTION_NAME)
+        return len(chunks)
+
+    def delete_document(self, filename: str) -> bool:
+        """
+        Deletes all vector points associated with a specific document/source from Qdrant.
+        """
+        vs = self.vector_store
+        if vs is None:
+            logger.warning("Vector store unavailable; cannot delete vector points for '%s'", filename)
+            return False
+
+        try:
+            from qdrant_client.http import models
+
+            filter_selector = models.Filter(
+                should=[
+                    models.FieldCondition(key="metadata.source", match=models.MatchValue(value=filename)),
+                    models.FieldCondition(key="source", match=models.MatchValue(value=filename)),
+                ]
+            )
+
+            result = vs.client.delete(
+                collection_name=self.settings.QDRANT_COLLECTION_NAME,
+                points_selector=filter_selector,
+                wait=True,
+            )
+            logger.info("Deleted Qdrant vector points for source '%s': status=%s", filename, getattr(result, "status", "ok"))
+            return True
+        except Exception as e:
+            logger.error("Failed to delete Qdrant vector points for source '%s': %s", filename, e)
+            return False
 
     def health_check(self) -> Dict[str, Any]:
         """Checks the readiness of the vector store without forcing heavy file locks."""
