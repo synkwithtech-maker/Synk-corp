@@ -19,13 +19,23 @@ An enterprise-ready customer support chatbot built with **FastAPI**, **LangGraph
    - Available via both `POST /chat/stream` (standard frontend payload) and `GET /chat/stream` (native browser `EventSource` and URL bar testing).
    - Real-time event lifecycle: `start` $\to$ `sources` $\to$ `token` (repeated) $\to$ `done` $\to$ `[DONE]`.
 
-3. **Defense-in-Depth Guardrails (`guardrails.py`)**:
+3. **Defense-in-Depth AI Guardrails (`guardrails.py`)**:
    - **Prompt Injection & Jailbreak Prevention**: Blocks instruction overrides (`ignore previous instructions`, `DAN`, persona hijacks) before hitting the vector database or LLM.
    - **PII Redaction**: Automatically detects and masks sensitive data (Credit Cards, SSNs, API secrets) to protect customer privacy and prevent memory leaks.
    - **System Prompt Leak Suppression**: Inspects generated output to ensure internal prompt instructions and model delimiters are never regurgitated.
    - **Strict Grounding Enforcement**: Guarantees answers strictly reflect Synk Corp documents, falling back to a safe refusal when information is absent.
 
-4. **Redis Conversation Memory (`memory.py`)**:
+4. **Enterprise Security, Authentication & Hardening (`security.py`)**:
+   - **Role-Based API Key Authentication**: Destructive RAG endpoints (`POST /rag/upload`, `PUT /rag/documents/...`, `DELETE /rag/documents/...`, `/admin/ingest/url`) require `ADMIN_API_KEY`.
+   - **Client API Key (Optional)**: Chat endpoints support optional API key verification via `REQUIRE_API_KEY_FOR_CHAT`.
+   - **Sliding-Window Rate Limiting (Anti-DDoS & LLM Wallet Drain Defense)**: Limits requests per client IP (30 req/min for chat, 10 req/min for admin RAG) using Redis or in-memory sliding bucket.
+   - **Server-Side Request Forgery (SSRF) Protection**: Blocks malicious internal, private, loopback, and cloud metadata requests (`169.254.169.254`) on URL scraping.
+   - **Path Traversal & Filename Sanitization**: Replaces dangerous traversal patterns (`../`), disallows hidden files and Windows reserved device names (`CON`, `PRN`).
+   - **Upload Payload Guard**: Enforces maximum upload file size (`MAX_UPLOAD_SIZE_MB`, default 15MB) preventing memory exhaustion DoS.
+   - **Session ID Injection Guard**: Enforces strict alphanumeric / dash validation on `session_id`.
+   - **OWASP HTTP Security Headers**: Injects `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection`, and `Referrer-Policy`.
+
+5. **Redis Conversation Memory (`memory.py`)**:
    - Multi-turn conversational memory partitioned by `session_id`.
    - **Sliding TTL Expiration**: Session keys automatically expire (default: 24h) and refresh on user activity.
    - **Sliding History Window**: Injects recent dialogue turns within context budget.
@@ -45,23 +55,23 @@ An enterprise-ready customer support chatbot built with **FastAPI**, **LangGraph
 
 ## 📡 API Endpoints Reference
 
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/` | Operational status and API metadata. |
-| `GET` | `/health` | Health probe (API, Redis status & latency, Qdrant readiness, Guardrails info). |
-| `POST` | `/chat` | Synchronous question answering; returns complete answer JSON with citations and latency. |
-| `POST` | `/chat/stream` | **Real-Time Token Streaming (SSE)**: Streams tokens live via Server-Sent Events. |
-| `GET` | `/chat/stream` | **Browser EventSource Streaming**: Stream live tokens via browser URL or native JS `EventSource`. |
-| `POST` | `/rag/upload` | **Upload File for RAG**: Send `.pdf`, `.docx`, `.csv`, `.json`, `.txt`, `.md` to index into Qdrant. |
-| `PUT` | `/rag/documents/{filename}` | **Update RAG File**: Replace an existing document and re-index its vectors. |
-| `DELETE` | `/rag/documents/{filename}` | **Delete RAG File**: Remove a document from storage and delete its vector points from Qdrant. |
-| `GET` | `/rag/documents` | **List RAG Documents**: View all indexed files, sizes, and timestamps. |
-| `POST` | `/rag/upload-batch` | **Batch Upload**: Upload multiple files simultaneously. |
-| `POST` | `/rag/test-retrieval` | **Test RAG Search**: Search indexed vectors directly without calling the LLM. |
-| `POST` | `/admin/ingest/url` | **Scrape URL**: Crawl a live website URL, extract clean text, and index into Qdrant. |
-| `GET` | `/chat/{session_id}/history` | Retrieve complete dialogue history stored in Redis for that session. |
-| `DELETE` | `/chat/{session_id}` | Clear conversation history from Redis. |
-| `GET` | `/docs` | Interactive Swagger UI documentation. |
+| Method | Endpoint | Auth Required | Description |
+|---|---|---|---|
+| `GET` | `/` | None | Operational status and API metadata. |
+| `GET` | `/health` | None | Health probe (API, Redis status, Qdrant readiness, Guardrails & Security status). |
+| `POST` | `/chat` | Optional (`CHAT_API_KEY`) | Synchronous question answering; returns complete answer JSON with citations. |
+| `POST` | `/chat/stream` | Optional (`CHAT_API_KEY`) | **Real-Time Token Streaming (SSE)**: Streams tokens live via Server-Sent Events. |
+| `GET` | `/chat/stream` | Optional (`CHAT_API_KEY`) | **Browser EventSource Streaming**: Stream live tokens via browser URL or JS `EventSource`. |
+| `POST` | `/rag/upload` | 🔒 **Admin API Key** | **Upload File for RAG**: Index `.pdf`, `.docx`, `.csv`, `.json`, `.txt`, `.md`. |
+| `PUT` | `/rag/documents/{filename}` | 🔒 **Admin API Key** | **Update RAG File**: Replace an existing document and re-index its vectors. |
+| `DELETE` | `/rag/documents/{filename}` | 🔒 **Admin API Key** | **Delete RAG File**: Remove document from storage and delete its vector points from Qdrant. |
+| `GET` | `/rag/documents` | Rate-Limited | **List RAG Documents**: View all indexed files, sizes, and timestamps. |
+| `POST` | `/rag/upload-batch` | 🔒 **Admin API Key** | **Batch Upload**: Upload multiple files simultaneously. |
+| `POST` | `/rag/test-retrieval` | Rate-Limited | **Test RAG Search**: Search indexed vectors directly without calling the LLM. |
+| `POST` | `/admin/ingest/url` | 🔒 **Admin API Key** | **Scrape URL (SSRF Protected)**: Crawl live webpage and index into Qdrant. |
+| `GET` | `/chat/{session_id}/history` | Optional (`CHAT_API_KEY`) | Retrieve complete dialogue history stored in Redis. |
+| `DELETE` | `/chat/{session_id}` | Optional (`CHAT_API_KEY`) | Clear conversation history from Redis. |
+| `GET` | `/docs` | None | Interactive Swagger UI documentation with **Authorize 🔒** dialog. |
 
 ---
 
@@ -72,7 +82,8 @@ When a corporate document is obsolete (e.g. `old_pricing.pdf`):
 
 **Via PowerShell / cURL:**
 ```powershell
-curl -X DELETE "http://127.0.0.1:8000/rag/documents/old_pricing.pdf"
+curl -X DELETE "http://127.0.0.1:8000/rag/documents/old_pricing.pdf" `
+     -H "X-API-Key: synk-admin-secret-2026"
 ```
 
 **Response:**
@@ -94,6 +105,7 @@ When a document has new terms, pricing, or policies:
 **Via PowerShell / cURL:**
 ```powershell
 curl -X PUT "http://127.0.0.1:8000/rag/documents/company_policy.pdf" `
+     -H "X-API-Key: synk-admin-secret-2026" `
      -F "file=@documents/company_policy_v2.pdf"
 ```
 
@@ -129,7 +141,8 @@ synkcorp/
 │   │   └── health.py          # / and /health status probes
 │   ├── core/                  # System Foundations & Policies
 │   │   ├── config.py          # Pydantic Settings & environment variables (.env)
-│   │   └── guardrails.py      # Prompt injection blocker, PII redaction & grounding
+│   │   ├── guardrails.py      # Prompt injection blocker, PII redaction & grounding
+│   │   └── security.py        # API key auth, IP rate limiter, SSRF & path traversal guards
 │   ├── schemas/               # Request/Response Data Models (Pydantic)
 │   │   ├── chat.py            # ChatRequest, ChatResponse, Stream events
 │   │   └── rag.py             # Upload, update, delete, search schemas
@@ -153,6 +166,7 @@ synkcorp/
 - **Change Prompts / LLM Logic**: Modify [`app/services/chatbot.py`](file:///d:/synkcorp/app/services/chatbot.py).
 - **Configure Vector Search & Qdrant**: Modify [`app/services/rag.py`](file:///d:/synkcorp/app/services/rag.py).
 - **Update Safety Filters & PII Rules**: Modify [`app/core/guardrails.py`](file:///d:/synkcorp/app/core/guardrails.py).
+- **Manage API Keys, Rate Limits & Security Policies**: Modify [`app/core/security.py`](file:///d:/synkcorp/app/core/security.py).
 - **Adjust Redis TTL / Fallback Memory**: Modify [`app/services/memory.py`](file:///d:/synkcorp/app/services/memory.py).
 - **Add or Modify API Routes**: Update [`app/api/chat.py`](file:///d:/synkcorp/app/api/chat.py) or [`app/api/rag.py`](file:///d:/synkcorp/app/api/rag.py).
 - **Add Request / Response Fields**: Update [`app/schemas/chat.py`](file:///d:/synkcorp/app/schemas/chat.py) or [`app/schemas/rag.py`](file:///d:/synkcorp/app/schemas/rag.py).

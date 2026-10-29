@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.config import get_settings
+from app.core.security import SecurityHeadersMiddleware
 from app.services.memory import get_memory_manager
 from app.services.rag import get_rag_service
 from app.api.health import router as health_router
@@ -65,11 +66,17 @@ def create_app() -> FastAPI:
         openapi_url="/openapi.json",
     )
 
-    # Enable CORS for external frontends and web widgets
+    # 1. Apply OWASP Security Headers (Nosniff, Deny iframe clickjacking, XSS, Referrer)
+    app.add_middleware(SecurityHeadersMiddleware)
+
+    # 2. Hardened CORS configuration
+    cors_origins = settings.CORS_ORIGINS if settings.CORS_ORIGINS else ["*"]
+    cors_allow_creds = True if "*" not in cors_origins else False
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=True,
+        allow_origins=cors_origins,
+        allow_credentials=cors_allow_creds,
         allow_methods=["*"],
         allow_headers=["*"],
     )

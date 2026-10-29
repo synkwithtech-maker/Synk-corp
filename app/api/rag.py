@@ -8,9 +8,16 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 
 from app.core.config import get_settings
+from app.core.security import (
+    verify_admin_key,
+    admin_rate_limiter,
+    sanitize_and_validate_filename,
+    validate_file_size,
+    validate_safe_url,
+)
 from app.schemas.rag import (
     RAGUploadResponse,
     UpdateDocumentResponse,
@@ -38,26 +45,20 @@ SUPPORTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md", ".csv", ".json"]
     "/rag/upload",
     summary="Upload New Document for RAG",
     response_model=RAGUploadResponse,
+    dependencies=[Depends(verify_admin_key), Depends(admin_rate_limiter)],
 )
 async def rag_upload_file(file: UploadFile = File(...)):
     """
     Uploads a new file specifically for RAG purposes:
-    1. Saves the file to `documents/`.
-    2. Parses text (PDF, DOCX, CSV, JSON, TXT, MD).
-    3. Splits text into overlapping semantic chunks.
-    4. Generates vector embeddings and indexes them into Qdrant.
+    1. Validates and sanitizes filename (path traversal defense).
+    2. Enforces maximum upload payload limit (DoS defense).
+    3. Saves the file to `documents/`.
+    4. Parses text (PDF, DOCX, CSV, JSON, TXT, MD).
+    5. Splits text into overlapping semantic chunks.
+    6. Generates vector embeddings and indexes them into Qdrant.
     """
-    filename = file.filename
-    if not filename:
-        raise HTTPException(status_code=400, detail="No file selected.")
-
-    clean_name = Path(filename).name
+    clean_name = sanitize_and_validate_filename(file.filename or "", SUPPORTED_EXTENSIONS)
     ext = Path(clean_name).suffix.lower()
-    if ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file type '{ext}'. Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}",
-        )
 
     docs_dir = settings.DOCUMENTS_DIR
     docs_dir.mkdir(exist_ok=True)
@@ -65,6 +66,7 @@ async def rag_upload_file(file: UploadFile = File(...)):
 
     try:
         content = await file.read()
+        validate_file_size(content, max_mb=settings.MAX_UPLOAD_SIZE_MB)
         file_size_kb = round(len(content) / 1024, 2)
 
         with open(destination, "wb") as f:
@@ -108,6 +110,7 @@ async def rag_upload_file(file: UploadFile = File(...)):
     "/rag/documents/{filename}",
     summary="Update / Replace Existing RAG Document",
     response_model=UpdateDocumentResponse,
+    dependencies=[Depends(verify_admin_key), Depends(admin_rate_limiter)],
 )
 async def update_rag_document(
     filename: str,
@@ -115,18 +118,14 @@ async def update_rag_document(
 ):
     """
     Updates or replaces an existing corporate document in the RAG knowledge base:
-    1. Removes all existing vector chunks associated with this filename from Qdrant.
-    2. Overwrites the file in the `documents/` directory with the new version.
-    3. Re-parses and re-indexes the new content into Qdrant vectors.
+    1. Validates and sanitizes filename (path traversal defense).
+    2. Enforces maximum upload payload limit.
+    3. Removes all existing vector chunks associated with this filename from Qdrant.
+    4. Overwrites the file in the `documents/` directory with the new version.
+    5. Re-parses and re-indexes the new content into Qdrant vectors.
     """
-    clean_name = Path(filename).name
+    clean_name = sanitize_and_validate_filename(filename, SUPPORTED_EXTENSIONS)
     ext = Path(clean_name).suffix.lower()
-
-    if ext not in SUPPORTED_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported file format '{ext}'. Supported formats: {', '.join(SUPPORTED_EXTENSIONS)}",
-        )
 
     docs_dir = settings.DOCUMENTS_DIR
     docs_dir.mkdir(exist_ok=True)
@@ -139,6 +138,7 @@ async def update_rag_document(
         old_vectors_removed = await asyncio.to_thread(rag_service.delete_document, clean_name)
 
         content = await file.read()
+        validate_file_size(content, max_mb=settings.MAX_UPLOAD_SIZE_MB)
         file_size_kb = round(len(content) / 1024, 2)
         with open(destination, "wb") as f:
             f.write(content)
@@ -181,14 +181,16 @@ async def update_rag_document(
     "/rag/documents/{filename}",
     summary="Delete Document from RAG Knowledge Base",
     response_model=DeleteDocumentResponse,
+    dependencies=[Depends(verify_admin_key), Depends(admin_rate_limiter)],
 )
 async def delete_rag_document(filename: str):
     """
     Deletes a company document from both disk and the Qdrant vector database:
-    1. Removes all vector chunks for this source from Qdrant so the AI stops using it.
-    2. Deletes the physical file from the `documents/` folder.
+    1. Sanitizes filename (path traversal defense).
+    2. Removes all vector chunks for this source from Qdrant so the AI stops using it.
+    3. Deletes the physical file from the `documents/` folder.
     """
-    clean_name = Path(filename).name
+    clean_name = sanitize_and_validate_filename(filename, SUPPORTED_EXTENSIONS)
     docs_dir = settings.DOCUMENTS_DIR
     target_path = docs_dir / clean_name
 
@@ -223,6 +225,7 @@ async def delete_rag_document(filename: str):
     "/rag/upload-batch",
     summary="Batch Upload Files for RAG",
     response_model=RAGBatchUploadResponse,
+    dependencies=[Depends(verify_admin_key), Depends(admin_rate_limiter)],
 )
 async def rag_upload_batch(files: List[UploadFile] = File(...)):
     """
@@ -230,6 +233,9 @@ async def rag_upload_batch(files: List[UploadFile] = File(...)):
     """
     if not files:
         raise HTTPException(status_code=400, detail="No files uploaded.")
+
+    if len(files) > 10:
+        raise HTTPException(status_code=400, detail="Batch limit exceeded. Maximum 10 files per request.")
 
     docs_dir = settings.DOCUMENTS_DIR
     docs_dir.mkdir(exist_ok=True)
@@ -240,14 +246,13 @@ async def rag_upload_batch(files: List[UploadFile] = File(...)):
 
     for file in files:
         raw_filename = file.filename or "unnamed_file"
-        clean_name = Path(raw_filename).name
-        ext = Path(clean_name).suffix.lower()
-
-        if ext not in SUPPORTED_EXTENSIONS:
+        try:
+            clean_name = sanitize_and_validate_filename(raw_filename, SUPPORTED_EXTENSIONS)
+        except HTTPException as e:
             results.append({
-                "filename": clean_name,
+                "filename": raw_filename,
                 "status": "skipped",
-                "reason": f"Unsupported format '{ext}'",
+                "reason": e.detail,
                 "chunks_indexed": 0,
             })
             continue
@@ -255,6 +260,7 @@ async def rag_upload_batch(files: List[UploadFile] = File(...)):
         destination = docs_dir / clean_name
         try:
             content = await file.read()
+            validate_file_size(content, max_mb=settings.MAX_UPLOAD_SIZE_MB)
             with open(destination, "wb") as f:
                 f.write(content)
 
@@ -289,13 +295,15 @@ async def rag_upload_batch(files: List[UploadFile] = File(...)):
     "/rag/test-retrieval",
     summary="Test RAG Vector Retrieval (Search Without LLM)",
     response_model=RAGQueryTestResponse,
+    dependencies=[Depends(admin_rate_limiter)],
 )
 async def rag_test_retrieval(request: RAGQueryTestRequest):
     """
     Tests vector search retrieval against indexed documents without invoking the LLM.
+    Protected by rate limiting.
     """
     query = request.query.strip()
-    top_k = request.top_k
+    top_k = min(max(1, request.top_k), 20)  # Bound top_k to safe bounds
 
     rag_service = get_rag_service()
     docs = await asyncio.to_thread(rag_service.retrieve_context, query, top_k)
@@ -320,6 +328,7 @@ async def rag_test_retrieval(request: RAGQueryTestRequest):
     "/rag/documents",
     summary="List All Indexed RAG Documents",
     response_model=DocumentListResponse,
+    dependencies=[Depends(admin_rate_limiter)],
 )
 def list_rag_documents():
     """
@@ -354,28 +363,35 @@ def list_rag_documents():
     summary="Scrape & Ingest Webpage (URL)",
     response_model=IngestResponse,
     tags=["Knowledge Base Ingestion"],
+    dependencies=[Depends(verify_admin_key), Depends(admin_rate_limiter)],
 )
 async def ingest_webpage(request: IngestUrlRequest):
     """
     Fetches clean text from a live website URL, chunks it, and indexes it into Qdrant.
+    Secured with:
+    - Admin authentication (verify_admin_key)
+    - Anti-abuse rate limiting
+    - SSRF defense (blocking private, link-local, loopback, and metadata destinations)
     """
-    url = request.url.strip()
+    safe_url = validate_safe_url(request.url)
     try:
-        logger.info("Scraping webpage for knowledge base: %s", url)
-        docs = await asyncio.to_thread(load_url, url)
+        logger.info("Scraping validated webpage for knowledge base: %s", safe_url)
+        docs = await asyncio.to_thread(load_url, safe_url)
 
         rag_service = get_rag_service()
         chunks_count = await asyncio.to_thread(rag_service.add_documents, docs)
 
         return IngestResponse(
             status="success",
-            source=url,
+            source=safe_url,
             chunks_indexed=chunks_count,
-            message=f"Successfully scraped '{url}' and indexed {chunks_count} chunks into knowledge base.",
+            message=f"Successfully scraped '{safe_url}' and indexed {chunks_count} chunks into knowledge base.",
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.exception("Failed to ingest URL '%s': %s", url, e)
+        logger.exception("Failed to ingest URL '%s': %s", safe_url, e)
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Failed to crawl or index URL: {str(e)}",

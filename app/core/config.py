@@ -91,6 +91,46 @@ class Settings(BaseSettings):
         description="Verify outputs adhere strictly to company document context",
     )
 
+    # API Authentication & Authorization
+    ADMIN_API_KEY: str = Field(
+        default="synk-admin-secret-key-change-me",
+        description="Master API key required for admin and RAG lifecycle endpoints (upload, update, delete)",
+    )
+    REQUIRE_API_KEY_FOR_CHAT: bool = Field(
+        default=False,
+        description="Whether client chat endpoints require an API key (True) or remain public for website widgets (False)",
+    )
+    CHAT_API_KEY: Optional[str] = Field(
+        default="synk-client-secret-key",
+        description="Client API key required for chat when REQUIRE_API_KEY_FOR_CHAT is True",
+    )
+
+    # Upload & DoS Protections
+    MAX_UPLOAD_SIZE_MB: int = Field(
+        default=15,
+        ge=1,
+        le=100,
+        description="Maximum allowed document upload size in megabytes",
+    )
+    RATE_LIMIT_CHAT_PER_MINUTE: int = Field(
+        default=30,
+        ge=1,
+        le=500,
+        description="Maximum chat questions allowed per minute per client IP",
+    )
+    RATE_LIMIT_ADMIN_PER_MINUTE: int = Field(
+        default=10,
+        ge=1,
+        le=100,
+        description="Maximum administrative operations allowed per minute per client IP",
+    )
+
+    # Network & CORS Security
+    CORS_ORIGINS: list[str] = Field(
+        default=["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:8000", "http://127.0.0.1:8000"],
+        description="Allowed CORS origin domains",
+    )
+
 
 @lru_cache()
 def get_settings() -> Settings:

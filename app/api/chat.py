@@ -5,8 +5,10 @@ Chat and streaming API routes.
 import asyncio
 import logging
 import time
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
+
+from app.core.security import verify_chat_key, chat_rate_limiter, validate_session_id
 
 from app.schemas.chat import (
     ChatRequest,
@@ -26,11 +28,13 @@ router = APIRouter(tags=["Chatbot"])
     "/chat",
     summary="Submit Support Question (Synchronous)",
     response_model=ChatResponse,
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 @router.post(
     "/chat/",
     include_in_schema=False,
     response_model=ChatResponse,
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 async def chat(request: ChatRequest):
     """
@@ -39,18 +43,12 @@ async def chat(request: ChatRequest):
     fetches documents from Qdrant, verifies output grounding, and returns response.
     """
     question = request.question.strip()
-    session_id = request.session_id.strip()
+    session_id = validate_session_id(request.session_id)
 
     if not question:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Question cannot be empty or whitespace.",
-        )
-
-    if not session_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID cannot be empty or whitespace.",
         )
 
     start_time = time.perf_counter()
@@ -94,13 +92,14 @@ async def chat(request: ChatRequest):
     summary="Real-Time Token Streaming (POST SSE)",
     tags=["Streaming"],
     response_description="Server-Sent Events stream of live tokens, citations, and status events.",
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 async def chat_stream_post(request: ChatRequest):
     """
     Streams the assistant's answer chunk-by-chunk in real time using Server-Sent Events (SSE).
     """
     question = request.question.strip()
-    session_id = request.session_id.strip()
+    session_id = validate_session_id(request.session_id)
 
     if not question:
         raise HTTPException(
@@ -126,17 +125,18 @@ async def chat_stream_post(request: ChatRequest):
     summary="Real-Time Token Streaming (GET SSE / Browser EventSource)",
     tags=["Streaming"],
     response_description="Server-Sent Events stream accessible via browser URL or native EventSource.",
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 async def chat_stream_get(
     question: str = Query(..., min_length=1, max_length=2000, description="The customer's question"),
-    session_id: str = Query(default="default-session", min_length=1, max_length=128, description="Unique session ID"),
+    session_id: str = Query(default="default-session", min_length=1, max_length=64, description="Unique session ID"),
 ):
     """
     GET version of the SSE streaming endpoint.
     Allows testing directly from your browser address bar or connecting via JavaScript's `new EventSource('/chat/stream?question=...')`.
     """
     clean_q = question.strip()
-    clean_sid = session_id.strip()
+    clean_sid = validate_session_id(session_id)
 
     logger.info("Initiating GET SSE token stream for session_id='%s'", clean_sid)
 
@@ -183,22 +183,19 @@ def chat_history_info():
     "/chat/{session_id}/history",
     summary="Retrieve Session History",
     response_model=SessionHistoryResponse,
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 @router.get(
     "/chat/{session_id}/history/",
     include_in_schema=False,
     response_model=SessionHistoryResponse,
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 def get_session_history(session_id: str):
     """
     Fetches the persisted conversation history for a given session from Redis.
     """
-    cleaned_id = session_id.strip()
-    if not cleaned_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID must not be empty.",
-        )
+    cleaned_id = validate_session_id(session_id)
 
     memory_manager = get_memory_manager()
     raw_history = memory_manager.get_messages(cleaned_id)
@@ -224,22 +221,19 @@ def get_session_history(session_id: str):
     "/chat/{session_id}",
     summary="Clear Session Conversation",
     response_model=ClearSessionResponse,
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 @router.delete(
     "/chat/{session_id}/",
     include_in_schema=False,
     response_model=ClearSessionResponse,
+    dependencies=[Depends(verify_chat_key), Depends(chat_rate_limiter)],
 )
 def clear_session(session_id: str):
     """
     Deletes the conversation history for a session from Redis.
     """
-    cleaned_id = session_id.strip()
-    if not cleaned_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Session ID must not be empty.",
-        )
+    cleaned_id = validate_session_id(session_id)
 
     memory_manager = get_memory_manager()
     cleared = memory_manager.clear(cleaned_id)

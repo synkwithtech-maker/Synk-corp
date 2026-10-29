@@ -22,6 +22,7 @@ class HealthResponse(BaseModel):
     memory: Dict[str, Any]
     rag: Dict[str, Any]
     guardrails: Dict[str, Any]
+    security: Dict[str, Any]
     features: list[str]
 
 
@@ -70,6 +71,17 @@ def health():
         "strict_grounding": settings.GUARDRAIL_STRICT_GROUNDING,
     }
 
+    security_info = {
+        "admin_auth_enforced": True,
+        "chat_auth_required": settings.REQUIRE_API_KEY_FOR_CHAT,
+        "rate_limiting_active": True,
+        "chat_rate_limit_per_min": settings.RATE_LIMIT_CHAT_PER_MINUTE,
+        "admin_rate_limit_per_min": settings.RATE_LIMIT_ADMIN_PER_MINUTE,
+        "max_upload_size_mb": settings.MAX_UPLOAD_SIZE_MB,
+        "ssrf_defense_enabled": True,
+        "owasp_headers_active": True,
+    }
+
     return HealthResponse(
         status=overall_status,
         app_version=settings.APP_VERSION,
@@ -78,6 +90,7 @@ def health():
         memory=mem_health,
         rag=rag_health,
         guardrails=guardrails_info,
+        security=security_info,
         features=[
             "rag_search",
             "redis_conversation_memory",
@@ -86,5 +99,10 @@ def health():
             "multi_source_ingestion_pdf_docx_csv_json_url",
             "dedicated_rag_upload_api",
             "rag_document_lifecycle_update_delete",
+            "admin_api_key_auth",
+            "per_ip_rate_limiting",
+            "path_traversal_sanitization",
+            "ssrf_protection",
+            "owasp_security_headers",
         ],
     )
