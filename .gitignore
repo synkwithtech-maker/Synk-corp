@@ -1,0 +1,22 @@
+```gitignore
+# Environment variables and secrets
+.env
+.env.*
+!.env.example
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local vector database
+qdrant_data/
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+```
