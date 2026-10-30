@@ -11,6 +11,11 @@ from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
 
 from config import Settings, get_settings
+from constants import (
+    NO_CONTEXT_REFUSAL,
+    SYSTEM_ERROR_FALLBACK,
+    DEFAULT_SAFETY_REFUSAL,
+)
 from memory import BaseMemoryManager, get_memory_manager
 from rag import RAGService, get_rag_service
 from guardrails import GuardrailsService, get_guardrails_service
@@ -100,7 +105,7 @@ class SupportChatbotEngine:
     def _guardrail_block_node(self, state: SupportState) -> Dict[str, Any]:
         """Terminal Node for requests blocked at input guardrail."""
         return {
-            "answer": state.get("answer") or "This request cannot be processed due to safety policies.",
+            "answer": state.get("answer") or DEFAULT_SAFETY_REFUSAL,
             "sources": [],
         }
 
@@ -131,11 +136,7 @@ class SupportChatbotEngine:
 
         # Avoid hallucinations if no context is retrieved
         if not context:
-            answer = (
-                "I couldn't find that information in the available "
-                "Synk Corp documents. Please contact the company "
-                "for confirmation."
-            )
+            answer = NO_CONTEXT_REFUSAL
             return {"answer": answer}
 
         # Window recent conversation history for prompt injection
@@ -181,10 +182,7 @@ Answer:
                 answer = str(answer)
         except Exception as e:
             logger.error("Error generating answer from LLM: %s", e)
-            answer = (
-                "We are experiencing temporary difficulties processing your request. "
-                "Please try again shortly or contact Synk Corp support."
-            )
+            answer = SYSTEM_ERROR_FALLBACK
 
         return {"answer": answer}
 

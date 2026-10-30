@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Pattern
 
 from config import Settings, get_settings
+from constants import NO_CONTEXT_REFUSAL, PROMPT_INJECTION_REFUSAL, SYSTEM_PROMPT_LEAK_FALLBACK
 
 logger = logging.getLogger("synkcorp.guardrails")
 
@@ -102,7 +103,7 @@ class InputGuardrail:
                     passed=False,
                     sanitized_text="",
                     category="prompt_injection",
-                    reason="I am designed solely to assist with Synk Corp customer inquiries. I cannot execute system override commands.",
+                    reason=PROMPT_INJECTION_REFUSAL,
                     metadata={"matched_pattern": injection_match},
                 )
 
@@ -156,10 +157,7 @@ class OutputGuardrail:
         if self.detect_system_leak(answer):
             return GuardrailResult(
                 passed=False,
-                sanitized_text=(
-                    "I am the customer support assistant for Synk Corp. "
-                    "How can I assist you with our services today?"
-                ),
+                sanitized_text=SYSTEM_PROMPT_LEAK_FALLBACK,
                 category="system_prompt_leak_prevented",
                 reason="System prompt leak was detected and suppressed.",
             )
@@ -167,11 +165,7 @@ class OutputGuardrail:
         # 2. Strict Grounding Validation
         # If no context was found, enforce standard refusal instead of hallucinating facts
         if self.settings.GUARDRAIL_STRICT_GROUNDING and not context.strip():
-            safe_refusal = (
-                "I couldn't find that information in the available "
-                "Synk Corp documents. Please contact the company "
-                "for confirmation."
-            )
+            safe_refusal = NO_CONTEXT_REFUSAL
             # If the model tried to answer anyway without context, sanitize to safe refusal
             if answer.strip() != safe_refusal and len(answer) > 200:
                 logger.info("Enforcing strict grounding fallback for ungrounded answer.")
