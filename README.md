@@ -4,6 +4,112 @@ An enterprise-ready customer support chatbot built with **FastAPI**, **LangGraph
 
 ---
 
+## 🚀 Quickstart & Setup Guide
+
+Follow these steps to set up and run the project locally.
+
+### 1. Prerequisites
+* **Python**: Python 3.10+ (tested on Python 3.10 – 3.14)
+* **Docker** (recommended for running Redis) or a local Redis server
+* **LLM API Key**: [OpenRouter API Key](https://openrouter.ai) or OpenAI API Key
+
+---
+
+### 2. Set Up Virtual Environment & Dependencies
+
+```bash
+# Clone the repository
+git clone https://github.com/synkwithtech-maker/Synk-corp.git
+cd Synk-corp
+
+# Create a virtual environment
+python -m venv venv
+
+# Activate the virtual environment
+# On macOS / Linux:
+source venv/bin/activate
+
+# On Windows (PowerShell):
+.\venv\Scripts\Activate.ps1
+
+# On Windows (Command Prompt):
+.\venv\Scripts\activate.bat
+
+# Install required dependencies
+pip install -r requirements.txt
+```
+
+---
+
+### 3. Configure Environment Variables
+
+Copy `.env.example` to create your local `.env` file:
+
+```bash
+# On Linux / macOS:
+cp .env.example .env
+
+# On Windows (PowerShell / CMD):
+copy .env.example .env
+```
+
+Open `.env` and fill in your settings:
+* `OPENROUTER_API_KEY`: Your OpenRouter API key (or `OPENAI_API_KEY`).
+* `OPENROUTER_MODEL`: LLM model identifier (e.g. `qwen/qwen3.8-27b`).
+* `EMBEDDING_MODEL_NAME`: Embedding model (e.g. `sentence-transformers/all-MiniLM-L6-v2`).
+* Adjust Redis or Qdrant parameters if using custom hostnames or ports.
+
+---
+
+### 4. Start Redis
+
+Start a Redis container via Docker:
+
+```bash
+docker run -d --name synk-redis -p 6379:6379 redis:alpine
+```
+*(Or run in foreground: `docker run -p 6379:6379 redis`)*
+
+> **Note:** If Redis is offline, the service automatically falls back to an in-memory session manager for local development without failing.
+
+---
+
+### 5. Ingest Knowledge Base Documents
+
+Place your reference documents (`.txt` or `.md`) into the `documents/` directory:
+
+```bash
+# Create directory if it does not exist
+mkdir documents
+
+# Place your documents inside (e.g. documents/synk_company_info.txt)
+```
+
+Run the ingestion script to generate embeddings and populate the local Qdrant vector database:
+
+```bash
+python ingest.py
+```
+*Expected output:* `[OK] Ingestion complete. <N> chunks indexed.`
+
+---
+
+### 6. Start the API Server
+
+Launch the FastAPI service using Uvicorn:
+
+```bash
+uvicorn api:app --reload
+```
+
+Once started, access the service:
+* **API Root:** `http://localhost:8000`
+* **Interactive Swagger UI:** `http://localhost:8000/docs`
+* **Alternative API Docs (ReDoc):** `http://localhost:8000/redoc`
+* **Health Probes:** `http://localhost:8000/health`
+
+---
+
 ## 🌟 Key Architectural Features
 
 1. **Defense-in-Depth Guardrails (`guardrails.py`)**:
@@ -92,5 +198,3 @@ curl -X POST "http://localhost:8000/chat" \
   "latency_ms": 1150.4
 }
 ```
-
-
