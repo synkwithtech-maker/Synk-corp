@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     # Redis conversation memory settings
     REDIS_ENABLED: bool = Field(default=True, description="Enable Redis memory backend")
     REDIS_URL: Optional[str] = Field(
-        default="redis://localhost:6379/0",
+        default=None,
         description="Redis connection URL (takes precedence over host/port if set)",
     )
     REDIS_HOST: str = Field(default="localhost", description="Redis server host")
