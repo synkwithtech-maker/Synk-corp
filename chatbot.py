@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
 
 from config import Settings, get_settings
 from memory import BaseMemoryManager, get_memory_manager
@@ -237,8 +236,7 @@ Answer:
             builder.add_edge("output_guardrail", END)
             builder.add_edge("guardrail_block", END)
 
-            # In-memory checkpointing for graph execution state
-            self._graph = builder.compile(checkpointer=InMemorySaver())
+            self._graph = builder.compile()
         return self._graph
 
     def ask(self, question: str, session_id: str) -> Dict[str, Any]:
@@ -247,12 +245,6 @@ Answer:
         Retrieves history from Redis memory, runs guarded LangGraph, and persists
         the clean dialogue turn back into Redis.
         """
-        config = {
-            "configurable": {
-                "thread_id": session_id,
-            }
-        }
-
         # 1. Fetch conversation history from Redis / memory manager
         history = self.memory_manager.get_messages(
             session_id=session_id,
@@ -273,7 +265,7 @@ Answer:
             "guardrail_reason": None,
         }
 
-        result = self.graph.invoke(initial_state, config=config)
+        result = self.graph.invoke(initial_state)
         answer = result.get("answer", "")
         sources = result.get("sources", [])
         guardrail_passed = result.get("guardrail_passed", True)
