@@ -117,7 +117,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[str] = Field(default_factory=list, description="Documents referenced for the answer")
     guardrail_passed: bool = Field(default=True, description="Whether query passed safety guardrails")
-    guardrail_category: str = Field(default="clean", description="Safety category: clean, pii_masked, prompt_injection, system_leak_prevented")
+    guardrail_category: str = Field(default="clean", description="Safety category: clean, pii_masked, prompt_injection, system_prompt_leak_prevented")
     latency_ms: float = Field(..., description="Request processing time in milliseconds")
 
 

@@ -313,16 +313,6 @@ def get_chatbot_engine() -> SupportChatbotEngine:
     return _engine
 
 
-def ask_question(question: str, session_id: str) -> str:
-    """
-    Standard interface invoked by API endpoints.
-    Maintains 100% backward compatibility by returning the string answer.
-    """
-    engine = get_chatbot_engine()
-    result = engine.ask(question=question, session_id=session_id)
-    return result["answer"]
-
-
 def ask_question_detailed(question: str, session_id: str) -> Dict[str, Any]:
     """
     Rich interface providing answer, sources, and guardrail metadata.
