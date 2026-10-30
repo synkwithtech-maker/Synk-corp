@@ -71,3 +71,4 @@ def test_question_with_card_number_returns_pii_masked():
     assert response["guardrail_passed"] is True
     assert "[REDACTED_CREDIT_CARD]" in response["question"]
     assert "4111 1111 1111 1111" not in response["question"]
+
