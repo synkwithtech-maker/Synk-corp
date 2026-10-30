@@ -198,7 +198,11 @@ Answer:
 
         return {
             "answer": guard_result.sanitized_text,
-            "guardrail_category": guard_result.category or state.get("guardrail_category", "clean"),
+            "guardrail_category": (
+                guard_result.category
+                if guard_result.category and guard_result.category != "clean"
+                else state.get("guardrail_category", "clean")
+            ),
         }
 
     @property
