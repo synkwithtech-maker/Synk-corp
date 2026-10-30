@@ -4,6 +4,7 @@ Verifies that PII masked category is preserved through the output guardrail node
 and that full workflow retains guardrail_category = "pii_masked".
 """
 
+import pytest
 from unittest.mock import MagicMock
 from langchain_core.messages import AIMessage
 from langchain_core.documents import Document
@@ -72,3 +73,33 @@ def test_question_with_card_number_returns_pii_masked():
     assert "[REDACTED_CREDIT_CARD]" in response["question"]
     assert "4111 1111 1111 1111" not in response["question"]
 
+
+
+def test_llm_failure_propagates_and_does_not_save_to_memory():
+    """
+    Verifies that when LLM generation fails (e.g. OpenRouter outage),
+    the exception propagates out of ask() and the failed turn is NOT saved to memory.
+    """
+    settings = Settings()
+    engine = SupportChatbotEngine(settings=settings)
+
+    # Mock RAG retrieval
+    engine.rag_service.retrieve_context = MagicMock(return_value=[
+        Document(page_content="Synk Corp support details.", metadata={"source": "test.txt"})
+    ])
+
+    # Mock LLM failure
+    mock_llm = MagicMock()
+    mock_llm.invoke.side_effect = RuntimeError("OpenRouter service is down")
+    engine._llm = mock_llm
+
+    # Mock memory manager
+    engine.memory_manager.get_messages = MagicMock(return_value=[])
+    engine.memory_manager.append_turn = MagicMock()
+
+    # Verify that the exception propagates
+    with pytest.raises(RuntimeError, match="OpenRouter service is down"):
+        engine.ask(question="What services does Synk Corp provide?", session_id="test-session-err")
+
+    # Verify memory_manager.append_turn was NEVER called
+    engine.memory_manager.append_turn.assert_not_called()

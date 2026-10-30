@@ -13,7 +13,6 @@ from langgraph.graph import StateGraph, START, END
 from config import Settings, get_settings
 from constants import (
     NO_CONTEXT_REFUSAL,
-    SYSTEM_ERROR_FALLBACK,
     DEFAULT_SAFETY_REFUSAL,
 )
 from memory import BaseMemoryManager, get_memory_manager
@@ -175,14 +174,10 @@ User question:
 
 Answer:
 """
-        try:
-            response = self.llm.invoke(prompt)
-            answer = response.content
-            if not isinstance(answer, str):
-                answer = str(answer)
-        except Exception as e:
-            logger.error("Error generating answer from LLM: %s", e)
-            answer = SYSTEM_ERROR_FALLBACK
+        response = self.llm.invoke(prompt)
+        answer = response.content
+        if not isinstance(answer, str):
+            answer = str(answer)
 
         return {"answer": answer}
 

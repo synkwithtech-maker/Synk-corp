@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from config import get_settings
+from constants import SYSTEM_ERROR_FALLBACK
 from chatbot import ask_question_detailed
 from memory import get_memory_manager
 from rag import get_rag_service
@@ -288,11 +289,13 @@ async def chat(request: ChatRequest):
             latency_ms=latency_ms,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Chat processing failed for session_id='%s'", session_id)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while generating the support answer.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=SYSTEM_ERROR_FALLBACK,
         ) from e
 
 
