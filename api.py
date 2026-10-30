@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from config import get_settings
+from constants import SYSTEM_ERROR_FALLBACK
 from chatbot import ask_question_detailed
 from memory import get_memory_manager
 from rag import get_rag_service
@@ -117,7 +118,7 @@ class ChatResponse(BaseModel):
     answer: str
     sources: List[str] = Field(default_factory=list, description="Documents referenced for the answer")
     guardrail_passed: bool = Field(default=True, description="Whether query passed safety guardrails")
-    guardrail_category: str = Field(default="clean", description="Safety category: clean, pii_masked, prompt_injection, system_leak_prevented")
+    guardrail_category: str = Field(default="clean", description="Safety category: clean, pii_masked, prompt_injection, system_prompt_leak_prevented")
     latency_ms: float = Field(..., description="Request processing time in milliseconds")
 
 
@@ -288,11 +289,13 @@ async def chat(request: ChatRequest):
             latency_ms=latency_ms,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.exception("Chat processing failed for session_id='%s'", session_id)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while generating the support answer.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=SYSTEM_ERROR_FALLBACK,
         ) from e
 
 

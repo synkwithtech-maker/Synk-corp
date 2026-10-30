@@ -9,9 +9,12 @@ from typing import Any, Dict, List, Optional, TypedDict
 
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import InMemorySaver
 
 from config import Settings, get_settings
+from constants import (
+    NO_CONTEXT_REFUSAL,
+    DEFAULT_SAFETY_REFUSAL,
+)
 from memory import BaseMemoryManager, get_memory_manager
 from rag import RAGService, get_rag_service
 from guardrails import GuardrailsService, get_guardrails_service
@@ -101,7 +104,7 @@ class SupportChatbotEngine:
     def _guardrail_block_node(self, state: SupportState) -> Dict[str, Any]:
         """Terminal Node for requests blocked at input guardrail."""
         return {
-            "answer": state.get("answer") or "This request cannot be processed due to safety policies.",
+            "answer": state.get("answer") or DEFAULT_SAFETY_REFUSAL,
             "sources": [],
         }
 
@@ -132,11 +135,7 @@ class SupportChatbotEngine:
 
         # Avoid hallucinations if no context is retrieved
         if not context:
-            answer = (
-                "I couldn't find that information in the available "
-                "Synk Corp documents. Please contact the company "
-                "for confirmation."
-            )
+            answer = NO_CONTEXT_REFUSAL
             return {"answer": answer}
 
         # Window recent conversation history for prompt injection
@@ -175,17 +174,10 @@ User question:
 
 Answer:
 """
-        try:
-            response = self.llm.invoke(prompt)
-            answer = response.content
-            if not isinstance(answer, str):
-                answer = str(answer)
-        except Exception as e:
-            logger.error("Error generating answer from LLM: %s", e)
-            answer = (
-                "We are experiencing temporary difficulties processing your request. "
-                "Please try again shortly or contact Synk Corp support."
-            )
+        response = self.llm.invoke(prompt)
+        answer = response.content
+        if not isinstance(answer, str):
+            answer = str(answer)
 
         return {"answer": answer}
 
@@ -198,7 +190,11 @@ Answer:
 
         return {
             "answer": guard_result.sanitized_text,
-            "guardrail_category": guard_result.category or state.get("guardrail_category", "clean"),
+            "guardrail_category": (
+                guard_result.category
+                if guard_result.category and guard_result.category != "clean"
+                else state.get("guardrail_category", "clean")
+            ),
         }
 
     @property
@@ -233,8 +229,7 @@ Answer:
             builder.add_edge("output_guardrail", END)
             builder.add_edge("guardrail_block", END)
 
-            # In-memory checkpointing for graph execution state
-            self._graph = builder.compile(checkpointer=InMemorySaver())
+            self._graph = builder.compile()
         return self._graph
 
     def ask(self, question: str, session_id: str) -> Dict[str, Any]:
@@ -243,12 +238,6 @@ Answer:
         Retrieves history from Redis memory, runs guarded LangGraph, and persists
         the clean dialogue turn back into Redis.
         """
-        config = {
-            "configurable": {
-                "thread_id": session_id,
-            }
-        }
-
         # 1. Fetch conversation history from Redis / memory manager
         history = self.memory_manager.get_messages(
             session_id=session_id,
@@ -269,7 +258,7 @@ Answer:
             "guardrail_reason": None,
         }
 
-        result = self.graph.invoke(initial_state, config=config)
+        result = self.graph.invoke(initial_state)
         answer = result.get("answer", "")
         sources = result.get("sources", [])
         guardrail_passed = result.get("guardrail_passed", True)
@@ -311,16 +300,6 @@ def get_chatbot_engine() -> SupportChatbotEngine:
     if _engine is None:
         _engine = SupportChatbotEngine()
     return _engine
-
-
-def ask_question(question: str, session_id: str) -> str:
-    """
-    Standard interface invoked by API endpoints.
-    Maintains 100% backward compatibility by returning the string answer.
-    """
-    engine = get_chatbot_engine()
-    result = engine.ask(question=question, session_id=session_id)
-    return result["answer"]
 
 
 def ask_question_detailed(question: str, session_id: str) -> Dict[str, Any]:

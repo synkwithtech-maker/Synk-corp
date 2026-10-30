@@ -101,7 +101,7 @@ class RAGService:
             "qdrant_path": self.settings.QDRANT_PATH,
             "collection_name": self.settings.QDRANT_COLLECTION_NAME,
             "storage_path_exists": has_dir,
-            "connected": is_connected or has_dir,
+            "connected": is_connected,
         }
 
 
