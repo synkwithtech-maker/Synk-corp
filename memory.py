@@ -73,7 +73,12 @@ class RedisMemoryManager(BaseMemoryManager):
                 )
             # Test connection
             self._client.ping()
-            logger.info("Connected to Redis conversation store at %s", self.settings.REDIS_URL or self.settings.REDIS_HOST)
+            kwargs = self._client.connection_pool.connection_kwargs
+            logger.info(
+                "Connected to Redis conversation store at %s:%s",
+                kwargs.get("host"),
+                kwargs.get("port"),
+            )
         except Exception as e:
             logger.warning("Failed to connect to Redis: %s. Operations will fall back gracefully.", e)
             self._client = None
