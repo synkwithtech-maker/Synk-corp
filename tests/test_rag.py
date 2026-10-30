@@ -44,3 +44,4 @@ def test_api_health_endpoint_reflects_truthful_rag_state():
     assert isinstance(resp.rag, dict)
     assert "connected" in resp.rag
     assert "storage_path_exists" in resp.rag
+
